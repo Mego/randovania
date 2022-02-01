@@ -15,6 +15,12 @@ from randovania.game_description.world.node import Node, ResourceNode, EventNode
 from randovania.generator.generator_reach import GeneratorReach
 from randovania.resolver.state import State
 
+# Output of this module is a mapping
+# from
+#   resources
+# to
+#   tuple[ safe nodes, reachable nodes ]
+
 
 def _extra_requirement_for_node(game: GameDescription, node: Node) -> Optional[Requirement]:
     extra_requirement = None
