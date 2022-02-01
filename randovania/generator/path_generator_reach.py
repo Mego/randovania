@@ -42,6 +42,7 @@ class Path:
         - damage: The damage taken at the end of the path
         - requirement: The additional item requirements for completing this path
         - timed_events: After taking an EventNode, how many nodes the can still go before finding an use for that event
+        - nodes_left: How many nodes can still be navigated after the cost became non-zero.
     """
     cost: int
     nodes: Tuple[Node, ...]
@@ -49,6 +50,7 @@ class Path:
     damage: int
     requirement: RequirementList
     timed_events: Dict[SimpleResourceInfo, int]
+    nodes_left: int
 
     @classmethod
     def new_at(cls, state: State) -> "Path":
@@ -59,6 +61,7 @@ class Path:
             damage=state.maximum_energy - state.energy,
             requirement=RequirementList([]),
             timed_events={},
+            nodes_left=15,
         )
 
     def advance_to(
@@ -110,6 +113,12 @@ class Path:
             events[node.resource()] = 10  # TODO: max distance should depend on the event and be pre-calculated
             resources[node.resource()] = 1
 
+        nodes_left = self.nodes_left
+        if self.cost > 0:
+            nodes_left -= 1
+        if nodes_left < 0:
+            return None
+
         return Path(
             new_cost,
             self.nodes + (node,),
@@ -117,6 +126,7 @@ class Path:
             self.damage + damage,
             self.requirement.union(filtered),
             events,
+            nodes_left,
         )
 
     def is_worse_or_equivalent_than(self, other: "Path") -> bool:
@@ -144,11 +154,14 @@ class Path:
                          if other.resources.get(event, 0) > 0 else False
                          for event, time in self.timed_events.items())
 
+        # Having less nodes left is worse
+        worse_nodes_left = self.nodes_left <= other.nodes_left
+
         # All else equal, a path that takes a longer path is worse.
         worse_nodes = len(self.nodes) >= len(other.nodes)
 
         return (worse_cost and worse_damage and worse_requirement and worse_resources
-                and worse_time and worse_nodes)
+                and worse_time and worse_nodes_left and worse_nodes)
 
     def pretty_print(self):
         path = " -> ".join(node.name for node in self.nodes)
@@ -157,6 +170,7 @@ class Path:
             f"; Dmg: {self.damage}"
             f"; Reqs: {self.requirement}"
             f"; Events: {sorted((k.long_name, t) for k, t in self.timed_events.items())}"
+            f"; Left: {self.nodes_left}"
             f"\n* {path}\n")
 
 
@@ -220,7 +234,7 @@ class PathGeneratorReach(GeneratorReach):
         paths_to_examine = [first_path]
 
         while paths_to_examine:
-            path = paths_to_examine.pop(0)
+            path: Path = paths_to_examine.pop(0)
 
             existing = existing_paths[path.nodes[-1]]
             if any(path.is_worse_or_equivalent_than(e) for e in existing):
@@ -234,10 +248,11 @@ class PathGeneratorReach(GeneratorReach):
             for target_node, requirement in self._potential_nodes_from(path.nodes[-1]):
                 for req_list in requirement.alternatives:
                     new_path = path.advance_to(target_node, req_list, db)
-                    if new_path is None or len(new_path.nodes) > 15:
+                    if new_path is None:
                         continue
                     paths_to_examine.append(new_path)
 
+        # print(">>>>>>>>>>>>>>>>>>>>>>> explore!")
         # for node, paths in existing_paths.items():
         #     print("\n>> {}:".format(self._game.world_list.node_name(node, True)))
         #     for path in paths:
