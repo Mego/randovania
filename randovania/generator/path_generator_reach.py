@@ -11,7 +11,9 @@ from randovania.game_description.resources.resource_database import ResourceData
 from randovania.game_description.resources.resource_info import CurrentResources
 from randovania.game_description.resources.resource_type import ResourceType
 from randovania.game_description.resources.simple_resource_info import SimpleResourceInfo
-from randovania.game_description.world.node import Node, ResourceNode, EventNode
+from randovania.game_description.world.event_node import EventNode
+from randovania.game_description.world.node import Node, NodeContext
+from randovania.game_description.world.resource_node import ResourceNode
 from randovania.generator.generator_reach import GeneratorReach
 from randovania.resolver.state import State
 
@@ -74,7 +76,7 @@ class Path:
             self,
             node: Node,
             requirement: RequirementList,
-            db: ResourceDatabase,
+            context: NodeContext,
     ) -> Optional["Path"]:
 
         events = copy.copy(self.timed_events)
@@ -86,7 +88,7 @@ class Path:
 
             if item.is_damage:
                 continue
-            elif not item.satisfied(self.resources, 0, db):
+            elif not item.satisfied(self.resources, 0, context.database):
                 if item.resource.resource_type == ResourceType.ITEM and not item.negate:
                     result.append(item)
                 else:
@@ -100,7 +102,7 @@ class Path:
                 return None
 
         filtered = RequirementList(result)
-        damage = requirement.damage(self.resources, db)
+        damage = requirement.damage(self.resources, context.database)
 
         new_cost = self.cost
         if filtered.items - self.requirement.items:
@@ -112,12 +114,12 @@ class Path:
             for item in filtered.values():
                 resources[item.resource] = max(resources.get(item.resource, 0), item.amount)
 
-        if isinstance(node, EventNode) and resources.get(node.resource(), 0) == 0:
+        if isinstance(node, EventNode) and resources.get(node_resource := node.resource(context), 0) == 0:
             # TODO: maybe this shouldn't be just EventNode. There's things like PlayerShipNode and Blast Shields.
             if not filtered.items:
                 resources = copy.copy(resources)
-            events[node.resource()] = 10  # TODO: max distance should depend on the event and be pre-calculated
-            resources[node.resource()] = 1
+            events[node_resource] = 10  # TODO: max distance should depend on the event and be pre-calculated
+            resources[node_resource] = 1
 
         nodes_left = self.nodes_left
         if self.cost > 0:
@@ -217,10 +219,11 @@ class PathGeneratorReach(GeneratorReach):
         return reach
 
     def _potential_nodes_from(self, node: Node) -> Iterator[Tuple[Node, RequirementSet]]:
+        context = self.node_context()
         # extra_requirement = _extra_requirement_for_node(self._game, node)
-        requirement_to_leave = node.requirement_to_leave(self._state.patches, self._state.resources)
+        requirement_to_leave = node.requirement_to_leave(context)
 
-        for target_node, requirement in self._game.world_list.potential_nodes_from(node, self.state.patches):
+        for target_node, requirement in self._game.world_list.potential_nodes_from(node, context):
             if target_node is None:
                 continue
 
@@ -233,10 +236,10 @@ class PathGeneratorReach(GeneratorReach):
             yield target_node, requirement.as_set(self._state.resource_database)
 
     def _explore(self):
-        db = self._state.resource_database
+        context = self.node_context()
         first_path = Path.new_at(self._state)
 
-        existing_paths: Dict[Node, List[Path]] = collections.defaultdict(list)
+        existing_paths: dict[Node, list[Path]] = collections.defaultdict(list)
         paths_to_examine = [first_path]
 
         while paths_to_examine:
@@ -253,7 +256,7 @@ class PathGeneratorReach(GeneratorReach):
 
             for target_node, requirement in self._potential_nodes_from(path.nodes[-1]):
                 for req_list in requirement.alternatives:
-                    new_path = path.advance_to(target_node, req_list, db)
+                    new_path = path.advance_to(target_node, req_list, context)
                     if new_path is None:
                         continue
                     paths_to_examine.append(new_path)
@@ -336,7 +339,7 @@ class PathGeneratorReach(GeneratorReach):
             self._safe_nodes_cache[node] = False
             return False
 
-        db = self._state.resource_database
+        context = self.node_context()
         existing_paths: Dict[Node, List[Path]] = collections.defaultdict(list)
         paths_to_examine = [first_path]
 
@@ -354,7 +357,7 @@ class PathGeneratorReach(GeneratorReach):
 
             for target_node, requirement in self._potential_nodes_from(path.nodes[-1]):
                 for req_list in requirement.alternatives:
-                    new_path = path.advance_to(target_node, req_list, db)
+                    new_path = path.advance_to(target_node, req_list, context)
                     if new_path is None or len(new_path.nodes) > 15 or new_path.cost > 0:
                         continue
 

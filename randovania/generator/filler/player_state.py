@@ -156,20 +156,20 @@ class PlayerState:
         s = self.reach.state
 
         paths_to_be_opened = set()
-        for node, requirement in self.reach.unreachable_nodes_with_requirements().items():
-            for alternative in requirement.alternatives:
-                if any(r.negate or (r.resource.resource_type != ResourceType.ITEM
-                                    and not r.satisfied(s.resources, s.energy, self.game.resource_database))
-                       for r in alternative.values()):
-                    continue
-
-                paths_to_be_opened.add("* {}: {}".format(
-                    wl.node_name(node, with_world=True),
-                    " and ".join(sorted(
-                        r.pretty_text for r in alternative.values()
-                        if not r.satisfied(s.resources, s.energy, self.game.resource_database)
-                    ))
-                ))
+        # for node, requirement in self.reach.unreachable_nodes_with_requirements().items():
+        #     for alternative in requirement.alternatives:
+        #         if any(r.negate or (r.resource.resource_type != ResourceType.ITEM
+        #                             and not r.satisfied(s.resources, s.energy, self.game.resource_database))
+        #                for r in alternative.values()):
+        #             continue
+        #
+        #         paths_to_be_opened.add("* {}: {}".format(
+        #             wl.node_name(node, with_world=True),
+        #             " and ".join(sorted(
+        #                 r.pretty_text for r in alternative.values()
+        #                 if not r.satisfied(s.resources, s.energy, self.game.resource_database)
+        #             ))
+        #         ))
 
         teleporters = []
         for node in wl.all_nodes:
