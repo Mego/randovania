@@ -24,6 +24,8 @@ from randovania.resolver.state import State
 #   tuple[ safe nodes, reachable nodes ]
 
 
+PATH_GENERATOR_DEBUG = False
+
 def _extra_requirement_for_node(game: GameDescription, node: Node) -> Optional[Requirement]:
     extra_requirement = None
 
@@ -53,11 +55,11 @@ class Path:
         - nodes_left: How many nodes can still be navigated after the cost became non-zero.
     """
     cost: int
-    nodes: Tuple[Node, ...]
+    nodes: tuple[Node, ...]
     resources: CurrentResources
     damage: int
     requirement: RequirementList
-    timed_events: Dict[SimpleResourceInfo, int]
+    timed_events: dict[SimpleResourceInfo, int]
     nodes_left: int
 
     @classmethod
@@ -186,7 +188,7 @@ class PathGeneratorReach(GeneratorReach):
     _state: State
     _game: GameDescription
     _all_paths: Dict[Node, List[Path]]
-    _safe_nodes_cache: Dict[Node, bool]
+    _safe_nodes: set[Node]
 
     def __deepcopy__(self, memodict):
         reach = PathGeneratorReach(
@@ -203,6 +205,7 @@ class PathGeneratorReach(GeneratorReach):
         self._game = game
         self._state = state
         self._all_paths = {}
+        self._safe_nodes = set()
 
     @property
     def game(self) -> GameDescription:
@@ -241,6 +244,7 @@ class PathGeneratorReach(GeneratorReach):
 
         existing_paths: dict[Node, list[Path]] = collections.defaultdict(list)
         paths_to_examine = [first_path]
+        safe_nodes = {self._state.node}
 
         while paths_to_examine:
             path: Path = paths_to_examine.pop(0)
@@ -252,7 +256,10 @@ class PathGeneratorReach(GeneratorReach):
             worse = [p for p in existing if p.is_worse_or_equivalent_than(path)]
             for p in worse:
                 existing.remove(p)
+
             existing.append(path)
+            if path.cost == 0 and path.nodes[-1] in safe_nodes:
+                safe_nodes.union(path.nodes)
 
             for target_node, requirement in self._potential_nodes_from(path.nodes[-1]):
                 for req_list in requirement.alternatives:
@@ -261,25 +268,20 @@ class PathGeneratorReach(GeneratorReach):
                         continue
                     paths_to_examine.append(new_path)
 
-        # print(">>>>>>>>>>>>>>>>>>>>>>> explore!")
-        # for node, paths in existing_paths.items():
-        #     print("\n>> {}:".format(self._game.world_list.node_name(node, True)))
-        #     for path in paths:
-        #         # print("; ".join([f"{i}: {path.is_worse_than(p)}" for i, p in enumerate(paths)]))
-        #         path.pretty_print()
+        if PATH_GENERATOR_DEBUG:
+            print(">>>>>>>>>>>>>>>>>>>>>>> explore!")
+            for node, paths in existing_paths.items():
+                print("\n>> {}. Cost min {}, max {}".format(
+                    self._game.world_list.node_name(node, True),
+                    min(path.cost for path in paths),
+                    max(path.cost for path in paths),
+                ))
+                # for path in paths:
+                #     # print("; ".join([f"{i}: {path.is_worse_than(p)}" for i, p in enumerate(paths)]))
+                #     path.pretty_print()
 
         self._all_paths = existing_paths
-        self._safe_nodes_cache = {}
-
-    def _calculate_safe_nodes(self):
-        paths_to_examine = []
-
-        for node, paths in self._all_paths.items():
-            for path in paths:
-                if path.cost == 0:
-                    paths_to_examine.append(path)
-
-        pass
+        self._safe_nodes = safe_nodes
 
     @property
     def state(self) -> State:
@@ -298,8 +300,20 @@ class PathGeneratorReach(GeneratorReach):
     # Node stuff
 
     def is_reachable_node(self, node: Node) -> bool:
+        def resource_check(path: Path) -> bool:
+            if path.resources == self._state.resources:
+                return True
+
+            if len(path.timed_events) <= 1:
+                resources = copy.copy(path.resources)
+                for e in path.timed_events.keys():
+                    del resources[e]
+                return resources == self._state.resources
+
+            return False
+
         return any(
-            path.cost == 0 and path.resources == self._state.resources
+            path.cost == 0 and resource_check(path)
             for path in self._all_paths.get(node, [])
         )
 
@@ -326,52 +340,10 @@ class PathGeneratorReach(GeneratorReach):
                 yield node
 
     def is_safe_node(self, node: Node) -> bool:
-        if node in self._safe_nodes_cache:
-            return self._safe_nodes_cache[node]
-
-        first_path = None
-        for path in self._all_paths.get(node, []):
-            if path.cost == 0:
-                if first_path is None or first_path.damage > path.damage:
-                    first_path = path
-
-        if first_path is None:
-            self._safe_nodes_cache[node] = False
-            return False
-
-        context = self.node_context()
-        existing_paths: Dict[Node, List[Path]] = collections.defaultdict(list)
-        paths_to_examine = [first_path]
-
-        while paths_to_examine:
-            path = paths_to_examine.pop(0)
-
-            existing = existing_paths[path.nodes[-1]]
-            if any(path.is_worse_or_equivalent_than(e) for e in existing):
-                continue
-
-            worse = [p for p in existing if p.is_worse_or_equivalent_than(path)]
-            for p in worse:
-                existing.remove(p)
-            existing.append(path)
-
-            for target_node, requirement in self._potential_nodes_from(path.nodes[-1]):
-                for req_list in requirement.alternatives:
-                    new_path = path.advance_to(target_node, req_list, context)
-                    if new_path is None or len(new_path.nodes) > 15 or new_path.cost > 0:
-                        continue
-
-                    if new_path.nodes[-1] == self.state.node:
-                        self._safe_nodes_cache[node] = True
-                        return False
-
-                    paths_to_examine.append(new_path)
-
-        self._safe_nodes_cache[node] = False
-        return False
+        return node in self._safe_nodes
 
     def unsatisfied_requirement_list(self) -> Iterator[RequirementSet]:
         for node in self.all_nodes:
             for path in self._all_paths.get(node, []):
-                if path.cost > 0:
+                if path.cost == 1:
                     yield path.requirement

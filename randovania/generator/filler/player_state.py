@@ -203,7 +203,7 @@ class PlayerState:
             ", ".join(name if quantity == 1 else f"{name} x{quantity}"
                       for name, quantity in sorted(pickups_by_name_and_quantity.items())),
             ", ".join(sorted(to_progress)),
-            "\n".join(accessible_nodes) if len(accessible_nodes) < 15 else f"{len(accessible_nodes)} nodes total",
+            "\n".join(accessible_nodes) if len(accessible_nodes) < 999 else f"{len(accessible_nodes)} nodes total",
             sum(1 for n in self.reach.all_nodes if self.reach.is_safe_node(n)),
             "\n".join(sorted(paths_to_be_opened)) or "None",
             "\n".join(teleporters) or "None",
